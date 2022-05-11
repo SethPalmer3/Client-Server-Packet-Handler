@@ -1,0 +1,36 @@
+.\" Process this file with
+.\" groff -man -Tascii bxp_call.3bxp
+.\"
+.TH bxp_call 3bxp "April 2022" "University of Oregon" "Buffer Exchange Protocol"
+.SH NAME
+bxp_call - issue the next BXP call, waiting until a response is received.
+.SH SYNOPSIS
+.EX
+#include "BXP/bxp.h"
+
+int bxp_call(BXPConnection bxpc, const struct qdecl *query,
+             unsigned qlen, void *resp, unsigned rsize, unsigned *rlen);
+.EE
+.SH DESCRIPTION
+bxp_call() initiates a request/response exchange over `bxpc'.
+The query has been formatted into `query', and `qlen' must be the number of
+characters in `query' INCLUDING THE TERMINATING '\0'.
+Upon successful return, `resp' contains `rlen' bytes of data.
+.sp
+N.B. must be invoked as
+.br
+     bxp_call(bxpc, Q_Arg(query), qlen, resp, rsize, &rlen).
+.SH "RETURN VALUE"
+Returns 0 if failure, 1 if successful.
+.SH "ROLES USING THIS FUNCTION"
+Used only by clients.
+.SH FILES
+/usr/local/include/BXP/*.h
+.br
+/usr/local/lib/libBXP.a
+.SH AUTHOR
+Joe Sventek <jsventek@gmail.com>
+.SH "SEE ALSO"
+Intro(3bxp), bxp_init(3bxp), bxp_details(3bxp), bxp_connect(3bxp),
+bxp_disconnect(3bxp), bxp_offer(3bxp), bxp_withdraw(3bxp),
+bxp_query(3bxp), bxp_response(3bxp), bxp_shutdown(3bxp)

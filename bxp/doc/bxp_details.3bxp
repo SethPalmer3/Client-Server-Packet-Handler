@@ -1,0 +1,30 @@
+.\" Process this file with
+.\" groff -man -Tascii bxp_details.3bxp
+.\"
+.TH bxp_details 3bxp "April 2022" "University of Oregon" "Buffer Exchange Protocol"
+.SH NAME
+bxp_details - obtain ip address and port number
+.SH SYNOPSIS
+.EX
+#include "BXP/bxp.h"
+
+void bxp_details(char *ipaddr, unsigned short *port);
+.EE
+.SH DESCRIPTION
+bxp_details(), when invoked after a successful call to bxp_init(),
+returns an IP address in `ipaddr' and the assigned UDP port in `port'.
+.SH "RETURN VALUE"
+none
+.SH "ROLES USING THIS FUNCTION"
+Used primarily by clients of a service that have established their own service
+for callback.
+.SH FILES
+/usr/local/include/BXP/*.h
+.br
+/usr/local/lib/libBXP.a
+.SH AUTHOR
+Joe Sventek <jsventek@gmail.com>
+.SH "SEE ALSO"
+Intro(3bxp), bxp_init(3bxp), bxp_connect(3bxp), bxp_call(3bxp),
+bxp_disconnect(3bxp), bxp_offer(3bxp), bxp_withdraw(3bxp),
+bxp_query(3bxp), bxp_response(3bxp), bxp_shutdown(3bxp)

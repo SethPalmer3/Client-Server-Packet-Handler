@@ -1,0 +1,34 @@
+.\" Process this file with
+.\" groff -man -Tascii bxp_init.3bxp
+.\"
+.TH bxp_init 3bxp "April 2022" "University of Oregon" "Buffer Exchange Protocol"
+.SH NAME
+bxp_init - initialize the BXP system in your process
+.SH SYNOPSIS
+.EX
+#include "BXP/bxp.h"
+
+int bxp_init(unsigned short port, int ifEncrypted);
+.EE
+.SH DESCRIPTION
+bxp_init() initializes the BXP system in the calling process.
+It creates a UDP port at `port' if it is non-zero; if it is zero, a UDP port
+number is dynamically assigned.
+.sp
+If `ifEncrypted' is true, it creates public and private keys for
+SSL-style encryption over connections.
+.SH "RETURN VALUE"
+Upon successful initialization, 1 is returned. Otherwise, 0 is returned
+indicating failure.
+.SH "ROLES USING THIS FUNCTION"
+Used by both clients and servers.
+.SH FILES
+/usr/local/include/BXP/*.h
+.br
+/usr/local/lib/libBXP.a
+.SH AUTHOR
+Joe Sventek <jsventek@gmail.com>
+.SH "SEE ALSO"
+Intro(3bxp), bxp_details(3bxp), bxp_connect(3bxp), bxp_call(3bxp),
+bxp_disconnect(3bxp), bxp_offer(3bxp), bxp_withdraw(3bxp),
+bxp_query(3bxp), bxp_response(3bxp), bxp_shutdown(3bxp)

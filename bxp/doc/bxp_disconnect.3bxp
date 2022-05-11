@@ -1,0 +1,28 @@
+.\" Process this file with
+.\" groff -man -Tascii bxp_disconnect.3bxp
+.\"
+.TH bxp_disconnect 3bxp "April 2022" "University of Oregon" "Buffer Exchange Protocol"
+.SH NAME
+bxp_disconnect - close connection with service
+.SH SYNOPSIS
+.EX
+#include "BXP/bxp.h"
+
+int bxp_disconnect(BXPConnection bxpc);
+.EE
+.SH DESCRIPTION
+bxp_disconnect() closes an open connection with a service.
+.SH "RETURN VALUE"
+none
+.SH "ROLES USING THIS FUNCTION"
+Used only by clients.
+.SH FILES
+/usr/local/include/BXP/*.h
+.br
+/usr/local/lib/libBXP.a
+.SH AUTHOR
+Joe Sventek <jsventek@gmail.com>
+.SH "SEE ALSO"
+Intro(3bxp), bxp_init(3bxp), bxp_details(3bxp), bxp_connect(3bxp),
+bxp_call(3bxp), bxp_offer(3bxp), bxp_withdraw(3bxp),
+bxp_query(3bxp), bxp_response(3bxp), bxp_shutdown(3bxp)

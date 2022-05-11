@@ -1,0 +1,33 @@
+.\" Process this file with
+.\" groff -man -Tascii bxp_connect.3bxp
+.\"
+.TH bxp_connect 3bxp "April 2022" "University of Oregon" "Buffer Exchange Protocol"
+.SH NAME
+bxp_connect - connect to remote service
+.SH SYNOPSIS
+.EX
+#include "BXP/bxp.h"
+
+BXPConnection bxp_connect(char *host, unsigned short port,
+                          char *svcName, unsigned long seqno);
+.EE
+.SH DESCRIPTION
+bxp_connect() sends a connect request to host:port with an initial sequence
+number to use in the communications;
+`svcName' indicates the offered service of interest.
+.sp
+Requests an encrypted connection if bxp_init(?, 1), unencrypted otherwise.
+.SH "RETURN VALUE"
+Returns 0 if failure, the actual connection id if successful.
+.SH "ROLES USING THIS FUNCTION"
+Used only by clients.
+.SH FILES
+/usr/local/include/BXP/*.h
+.br
+/usr/local/lib/libBXP.a
+.SH AUTHOR
+Joe Sventek <jsventek@gmail.com>
+.SH "SEE ALSO"
+Intro(3bxp), bxp_init(3bxp), bxp_details(3bxp), bxp_call(3bxp),
+bxp_disconnect(3bxp), bxp_offer(3bxp), bxp_withdraw(3bxp),
+bxp_query(3bxp), bxp_response(3bxp), bxp_shutdown(3bxp)

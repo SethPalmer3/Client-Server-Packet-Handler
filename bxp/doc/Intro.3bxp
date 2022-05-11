@@ -1,0 +1,92 @@
+.\" Process this file with
+.\" groff -man -Tascii Intro.3bxp
+.\"
+.TH Intro 3bxp "April 2022" "University of Oregon" "Buffer Exchange Protocol"
+.SH NAME
+Introduction to the Oregon Buffer Exchange Protocol
+.SH DESCRIPTION
+One often encounters the requirements for a simple request/response
+networking capability.
+One can craft such a system using TCP, but reliable stream protocols were
+designed to maximize bulk data throughput instead of minimizing turnaround
+time.
+Some RPC systems exist, but require that one define one's interface in an
+interface definition language, execute a stub compiler to generate client
+stubs and server skeletons, and run a number of auxiliary services in
+order to use the system.
+.sp
+The Oregon Buffer Exchange Protocol is a simple buffer-exchange system over
+UDP.
+Each request/response is in terms of a client process exchanging an outgoing
+`char' buffer, and an incoming `char' buffer, with a server process.
+.SH "GENERAL ARCHITECTURE"
+Each process wishing to use the BXP system consists of at least three
+POSIX threads:
+.IP * 2
+a receiving thread that retrieves UDP packets from the network, and places each one in an incoming queue;
+.IP * 2
+a timer thread that processes retries of certain messages as well as being
+responsible for purging stale connections;
+.IP * 2
+to provide a service, one or more worker threads; each such thread obtains
+an element from an incoming queue, performs some actions, and sends the
+response back to the requestor;
+.IP * 2
+to use a service, one or more client threads; each such thread issues
+blocking requests to the selected service.
+.LP
+.sp
+The sending thread, timer thread, and worker threads sending a response also
+share connection state for each active connection.
+.SH "CLIENT PSEUDOCODE"
+.EX
+#include "BXP/bxp.h"
+#include <assert.h>
+* * *
+BXPConnection bxp;
+char resp[10000];
+Q_Decl(req,10000); // declares char req[10000] and a struct
+unsigned reqlen, resplen;
+.sp
+assert(bxp_init(0, 0|1));  // initialize and bind to ephemeral port
+                           // if client is secure but server is not,
+                           // connect will fail 
+// connect to "Service" in process on localhost:5000, seqno = 1
+assert((bxp = bxp_connect("localhost", 5000, "Service", 1)));
+.sp
+for (;;) {
+    // format request into `req', setting `reqlen' appropriately
+    assert(bxp_call(bxp, Q_arg(req), reqlen, resp, 10000, &resplen);
+    // process resp
+}
+bxp_disconnect(bxp);
+.EE
+.SH "SERVER PSEUDOCODE"
+.EX
+#include "BXP/bxp.h"
+#include <assert.h>
+* * *
+BXPConnection bxp;
+BXPService *svc;
+char query[10000]; resp[10000];
+unsigned qlen, rlen;
+.sp
+assert(bxp_init(5000, 0|1)); // initialize and bind to our service port
+                             // if secure, will accept and create both
+                             // secure and non-secure connections
+assert((svc = bxp_offer("SERVICE")); // offer service named "SERVICE"
+while ((qlen = bxp_query(svc, &bxp, query, 10000)) > 0) {
+    // process data in query, generate results in `resp' and set `rlen'
+    assert(bxp_response(svc, bxp, resp, rlen);
+}
+.EE
+.SH FILES
+/usr/local/include/BXP/*.h
+.br
+/usr/local/lib/libBXP.a
+.SH AUTHOR
+Joe Sventek <jsventek@gmail.com>
+.SH "SEE ALSO"
+bxp_init(3bxp), bxp_details(3bxp), bxp_connect(3bxp), bxp_call(3bxp),
+bxp_disconnect(3bxp), bxp_offer(3bxp), bxp_withdraw(3bxp),
+bxp_query(3bxp), bxp_response(3bxp), bxp_shutdown(3bxp)
