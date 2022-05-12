@@ -1,4 +1,4 @@
-CFLAGS=-W -Wall -pedantic -I/usr/local/include
+CFLAGS=-g -W -Wall -pedantic -I/usr/local/include
 LDFLAGS=-L/usr/local/lib
 PROGRAMS=dtsv1 dtsv2 dtsv3 dtsv4 echoclient dts-client
 LIBRARIES=-lBXP -lpthread -lADTs
