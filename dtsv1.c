@@ -13,8 +13,7 @@
 
 #define SERVICE "DTS"
 
-int main(UNUSED int argc, UNUSED char **argv){
-
+void *serverthread(UNUSED void *arg){
 	BXPEndpoint client;
 	BXPService bxps;
 	unsigned short port = PORT;
@@ -23,9 +22,8 @@ int main(UNUSED int argc, UNUSED char **argv){
 	unsigned len;
 	char *qry = (char*)malloc(BUFSIZ);
 	char *resp = (char*)malloc(BUFSIZ);
-	char *rest,*cmd;
 
-	assert(bxp_init(port, 1));
+	assert(bxp_init(port, ifEncrypted));
 	bxps = bxp_offer(service);
 	if(bxps==NULL){
 		printf("Could not initialize service\n");
@@ -34,22 +32,19 @@ int main(UNUSED int argc, UNUSED char **argv){
 		exit(EXIT_FAILURE);
 	}
 	while ((len = bxp_query(bxps, &client, qry, BUFSIZ)) > 0) {
-		/*cmd = qry;
-		rest = strchr(qry, ':');
-		*rest++ = '\0';
-		if(strcmp(cmd, "ECHO") == 0){
-			resp[0] = '1';
-			strcpy(resp+1, rest);
-		}else if(strcmp(cmd, "SINK") == 0){
-			sprintf(resp, "1");
-		}else{
-			sprintf(resp, "0Illegal Command %s", cmd);
-		}*/
 		sprintf(resp, "1%s", qry);
 		bxp_response(service, &client, resp, strlen(resp) + 1);
 	}
 	
 	free(qry);
 	free(resp);
+	return NULL;
+}
+
+int main(UNUSED int argc, UNUSED char **argv){
+	pthread_t s;	
+	pthread_create(&s, NULL, serverthread, NULL);
+	pthread_join(s, NULL);
+	
 	return 0;
 }
