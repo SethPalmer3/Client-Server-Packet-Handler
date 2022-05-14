@@ -5,7 +5,11 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <assert.h>
+#include <sys/time.h>
 #include "bxp/bxp.h"
+#include "ADTs/prioqueue.h"
+#include "ADTs/cskmap.h"
+
 
 #define UNUSED __attribute__((unused))
 
@@ -17,36 +21,61 @@ const int max_vals = 6;
 
 int next_word_index(char *start){
 	int spot = 0;
-	while (start[spot] != '|' && start[spot++] == '\0') {;}
+	while (start[spot] != '|' && start[spot] != '\0') {
+		spot++;
+	}
 	return spot + 1;
 }
 
-int get_param_values(char *vals_start, char **vals){
-	/* obtains all params values and returns the spots and number of values */
-	if (vals_start == NULL) {
-		return 0;
+char *get_request_arg(char *req, int ind){
+	int spot = 0;
+	for (int i = 0; i < ind; i++) {
+		spot += next_word_index(req + spot);
 	}
+	return req + spot;
+}
+
+int get_param_values(char *vals_start){
+	/* obtains all params values and returns the spots and number of values */
 	int num_vals = 0;
 	int spot = 0;
-	int last_spot = 0;
-	while (vals_start[spot] != '\0') {
-		if (num_vals >= max_vals) {
-			return 0;
-		}
-		last_spot = spot;
+	while (vals_start[spot] != '\0' && vals_start[spot] != '\n') {
 		spot += next_word_index(vals_start + spot);
-		strncpy(vals[num_vals++], vals_start + last_spot, spot - last_spot - 1);
+		num_vals++;
 	}
 	return num_vals;
+
+}
+
+int length_arg(char *arg_start){
+	int spot = 0;
+	while (arg_start[spot] != '|' && arg_start[spot] != '\0' && arg_start[spot] != '\n') {
+	spot++;
+	}
+	return spot;
+}
+
+int range_strtoint(char *start, int chars){
+	int ret = 0;
+	int place = 1;
+	for (int s = chars; s >= 0; s--) {
+		ret += (int)(start[s] - '0') * place;
+		place *= 10;
+	}
+	return ret;
 }
 
 int validrequest(char *req){
-	if (strncmp(req, "OneShot", 6) == 0) {
-		return 1;
-	}else if(strncmp(req, "Repeat", 5) == 0){
-		return 2;
-	}else if (strncmp(req, "Cancel", 5) == 0) {
-		return 3;
+	int num_vals;
+	if (strncmp(req, "OneShot", 7) == 0) {
+		num_vals = get_param_values(req + 8);
+		return num_vals == 6;
+	}else if(strncmp(req, "Repeat", 6) == 0){
+		num_vals = get_param_values(req + 7);
+		return num_vals == 6;
+	}else if (strncmp(req, "Cancel", 6) == 0) {
+		num_vals = get_param_values(req + 7);
+		return num_vals == 1;
 	}else{
 		return 0;
 	}
@@ -69,62 +98,20 @@ void *serverthread(UNUSED void *arg){
 		free(resp);
 		exit(EXIT_FAILURE);
 	}
-	char **values = (char **)malloc(sizeof(char *) * max_vals);
-	for (int i = 0; i < max_vals; i++) {
-		values[i] = (char *)malloc(sizeof(char) * BUFSIZ);
-	}
-	int num_vals;
 
 	while ((len = bxp_query(bxps, &client, qry, BUFSIZ)) > 0) {
-		char *request = strchr(qry, '|');
 		// determine if the request is valid at all
-		if (request == NULL ||
-			!validrequest(qry) ||
-		   	!(num_vals = get_param_values(request + 1, values))) {
+		if (!validrequest(qry)) {
 			sprintf(resp, "0");
-			goto respond;
+			bxp_response(service, &client, resp, strlen(resp) + 1);
+		}else{
+			sprintf(resp, "1%s", qry);
+			bxp_response(service, &client, resp, strlen(resp) + 1);
 		}
-		// determine the request from client
-		switch (validrequest(qry)) {
-		case 1:
-			// OneShot request
-			if(num_vals != 6){
-				sprintf(resp, "0");	
-				goto respond;
-			}
-			break;
-		case 2:
-			// Repeat request
-			if(num_vals != 6){
-				sprintf(resp, "0");	
-				goto respond;
-			}
-			break;
-		case 3:
-			// Cancel request
-			if(num_vals != 1){
-				sprintf(resp, "0");	
-				goto respond;
-			}
-			break;
-		case 0:
-			sprintf(resp, "0");	
-			goto respond;
-			break;
-
-		}
-			
-		sprintf(resp, "1%s", qry);
-		respond:
-		bxp_response(service, &client, resp, strlen(resp) + 1);
 	}
 	
 	free(qry);
 	free(resp);
-	for (int i = 0; i < max_vals; i++) {
-		free(values[i]);
-	}
-	free(values);
 	return NULL;
 }
 
