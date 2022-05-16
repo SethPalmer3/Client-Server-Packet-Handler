@@ -285,6 +285,7 @@ void *serverthread(UNUSED void *arg){
 			double *prio = (double*)malloc(sizeof(double));
 			*prio = difftime(clock(), last_epoch);
 
+			rqts->insert(rqts, prio, tmp); // Put request on request priority
 			blocking_q_insert(rqts, prio, tmp, &pq_lock, &pq_cond);
 
 			blocking_map_put(cncls, key, (void*)tmp, &cncls_lock, &cncls_cond); // Add Request to map to cancel possibly later
@@ -363,6 +364,7 @@ void *timer_thread(UNUSED void*a){
 }
 
 int main(UNUSED int argc, UNUSED char **argv){
+	signal(SIGALRM, SIG_IGN);
 	rqts = PrioQueue_create(cli_cmp, prio_free, cli_free);
 	cncls = CSKMap_create(cli_free);
 	pthread_t s;	
