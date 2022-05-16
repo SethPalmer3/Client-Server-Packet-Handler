@@ -296,27 +296,26 @@ void *serverthread(UNUSED void *arg){
 	
 	free(qry);
 	free(resp);
-	rqts->destroy(rqts);
-	cncls->destroy(cncls);
 	return NULL;
 }
 
 void alarmhandlr(UNUSED int sig){
 	signal(SIGALRM, alarmhandlr);
 	Request *holder = NULL;
-	time_t prio;
+	double *prio;
 	
 	if (blocking_q_size(rqts, &pq_lock, &pq_cond) == 0) {
 		return;
 	}
+	pthread_mutex_lock(&pq_lock);
 	time_t current; // current time
 	time(&current);
-	while (blocking_q_remove(rqts, (void**)&prio, (void**)&holder, &pq_lock, &pq_cond) && difftime(current, holder->add_time) >= holder->time) { // See if theres a request in queue and if their time has elapsed
+
+	while (rqts->removeMin(rqts, (void**)&prio, (void**)&holder)&& difftime(current, holder->add_time) >= holder->time) { // See if theres a request in queue and if their time has elapsed
 		if (holder->cancel) {
 			char* key = (char*)malloc(sizeof(char)*BUFSIZ);
 			sprintf(key, "%ld", holder->svid);
-			//blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
-			cli_free(holder);
+			blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
 			free(key);
 			holder = NULL;
 			time(&current);
@@ -324,14 +323,13 @@ void alarmhandlr(UNUSED int sig){
 		}
 		printf("Event fired: %lu|%s|%s|%u\n", holder->clid, holder->host, holder->service, holder->port);
 		if (strcmp(holder->request_type, "Repeat") == 0 && --holder->add_info_time != 0) { // if it is a repeat request put back if valid
-			prio = difftime(current, last_epoch);
+			*prio = difftime(current, last_epoch);
 			time(&holder->add_time);
-			blocking_q_insert(rqts, (void*)prio, holder, &pq_lock, &pq_cond);
+			rqts->insert(rqts, (void*)prio, (void*)holder);
 		}else{
 			char* key = (char*)malloc(sizeof(char)*BUFSIZ);
 			sprintf(key, "%ld", holder->svid);
-			//blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
-			cli_free(holder);
+			blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
 			free(key);
 			holder = NULL;
 		}
@@ -339,10 +337,12 @@ void alarmhandlr(UNUSED int sig){
 	}
 
 	if (holder != NULL) {
-		prio = difftime(current, last_epoch);
-		blocking_q_insert(rqts, (void*)prio, (void*)holder, &pq_lock, &pq_cond);
+		*prio = difftime(current, last_epoch);
+		rqts->insert(rqts, (void*)prio, (void*)holder);
 	}
 	time(&last_epoch);
+	pthread_cond_broadcast(&pq_cond);
+	pthread_mutex_unlock(&pq_lock);
 }
 
 void *timer_thread(UNUSED void*a){
@@ -363,6 +363,7 @@ void *timer_thread(UNUSED void*a){
 }
 
 int main(UNUSED int argc, UNUSED char **argv){
+	signal(SIGALRM, SIG_IGN);
 	rqts = PrioQueue_create(cli_cmp, prio_free, cli_free);
 	cncls = CSKMap_create(cli_free);
 	pthread_t s;	
@@ -371,6 +372,8 @@ int main(UNUSED int argc, UNUSED char **argv){
 	pthread_create(&t, NULL, timer_thread, NULL);
 	pthread_join(s, NULL);
 	pthread_join(t, NULL);
+	rqts->destroy(rqts);
+	cncls->destroy(cncls);
 	
 	return 0;
 }
