@@ -1,4 +1,5 @@
 #include <BXP/bxp.h>
+#include <bits/types/struct_timeval.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -10,6 +11,7 @@
 #include <time.h>
 #include "bxp/bxp.h"
 #include "ADTs/prioqueue.h"
+#include "ADTs/queue.h"
 #include "ADTs/cskmap.h"
 
 
@@ -17,13 +19,15 @@
 
 #define PORT 19999
 
+#define USECS 1000
+
 #define SERVICE "DTS"
 
 const int max_vals = 6;
 
-time_t last_epoch;
+long time_width = 10;
 
-// list of requests
+// list of waiting requests
 const PrioQueue *rqts;
 pthread_mutex_t pq_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t pq_cond = PTHREAD_COND_INITIALIZER;
@@ -32,6 +36,11 @@ pthread_cond_t pq_cond = PTHREAD_COND_INITIALIZER;
 const CSKMap *cncls;
 pthread_mutex_t cncls_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cncls_cond = PTHREAD_COND_INITIALIZER;
+
+// list of dispatching requests
+const Queue *disp;
+pthread_mutex_t disp_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t disp_cond = PTHREAD_COND_INITIALIZER;
 
 int next_word_index(char *start){
 	int spot = 0;
@@ -49,15 +58,14 @@ char *get_request_arg(char *req, int ind){
 	return req + spot;
 }
 
-int get_param_values(char *vals_start){
+int get_num_params(char *vals_start){
 	/* obtains all params values and returns the spots and number of values */
 	int num_vals = 0;
 	int spot = 0;
 	while (vals_start[spot] != '\0' && vals_start[spot] != '\n') {
-		spot += next_word_index(vals_start + spot);
-		num_vals++;
+		if (vals_start[spot++] == '|') {num_vals ++;}
 	}
-	return num_vals;
+	return num_vals+1;
 
 }
 
@@ -98,13 +106,13 @@ unsigned long range_strtounsignlong(char *start, int chars){
 int validrequest(char *req){
 	int num_vals;
 	if (strncmp(req, "OneShot", 7) == 0) {
-		num_vals = get_param_values(req + 8);
+		num_vals = get_num_params(req + 8);
 		return num_vals == 6;
 	}else if(strncmp(req, "Repeat", 6) == 0){
-		num_vals = get_param_values(req + 7);
+		num_vals = get_num_params(req + 7);
 		return num_vals == 6;
 	}else if (strncmp(req, "Cancel", 6) == 0) {
-		num_vals = get_param_values(req + 7);
+		num_vals = get_num_params(req + 7);
 		return num_vals == 1;
 	}else{
 		return 0;
@@ -119,16 +127,17 @@ struct request_block{
 	char *service;
 	unsigned long svid;
 	unsigned long clid;
-	double time;
-	double add_info_time; // Either number of micro seconds or number of repeats
+	struct timeval time;
+	unsigned long repeats; // Either number of micro seconds or number of repeats
+	unsigned long interval;
 	unsigned short port;
-	time_t add_time;
 	int cancel;
+	BXPEndpoint ep;
 };
 
 static unsigned long next_server_id = 0;
 
-Request *fill_info(char *req_str, unsigned long svid){
+Request *fill_info(char *req_str, unsigned long svid, BXPEndpoint ep){
 
 	char *req_typ = strndup(req_str, length_arg(req_str));
 	char *host = strndup(get_request_arg(req_str, 4), length_arg_ind(req_str, 4));
@@ -139,25 +148,42 @@ Request *fill_info(char *req_str, unsigned long svid){
 	new_req->request_type = req_typ;
 	new_req->service = service;
 	new_req->host = host;
+	
 	new_req->clid = (unsigned long)atol(get_request_arg(req_str, 1));
-	new_req->time = (double)atof(get_request_arg(req_str, 2));
-	new_req->add_info_time = (double)atof(get_request_arg(req_str, 3));
-	new_req->port = (unsigned short)atoi(get_request_arg(req_str, 6));
 	new_req->svid = svid;
-	new_req->cancel = 0;
-	time(&new_req->add_time);
+	if (strcmp(req_typ, "OneShot") == 0) {
+		new_req->time.tv_sec = (unsigned long)atol(get_request_arg(req_str, 2));
+		new_req->time.tv_usec = atol(get_request_arg(req_str, 3));
+		new_req->repeats = 1;
+	}else{
+		gettimeofday(&new_req->time, NULL);
+		new_req->interval = atol(get_request_arg(req_str, 2)) * 1000; // turns milliseconds interval to microseconds
+		new_req->time.tv_usec += new_req->interval;
+		new_req->repeats = atol(get_request_arg(req_str, 3));
+		if (new_req->repeats == 0) {
+			new_req->repeats--;
+		}
+	}
 
-	if (strcmp(req_typ, "Repeat") == 0) {new_req->time /= 1000;} // convert milliseconds to seconds
-	if (strcmp(req_typ, "Repeat") == 0 && new_req->add_info_time == 0) {--new_req->add_info_time;} // make repeats -1 to indicate repeat forever
-	if (strcmp(req_typ, "OneShot") == 0){new_req->add_info_time /= 10000000;} // conver microseconds to seconds 
+	new_req->port = (unsigned short)atoi(get_request_arg(req_str, 6));
+	new_req->cancel = 0;
+	new_req->ep = ep;
+
 	return new_req;
 }
 
 int cli_cmp(void *a, void *b){
 	/* compare client a to epoch b */
-	time_t a_t = (time_t)a;
-	time_t b_t = (time_t)b;
-	return a_t - b_t;
+	struct timeval *a_c = (struct timeval*)a;
+	struct timeval *b_c = (struct timeval*)b;
+	if (timercmp(a_c, b_c, >)) {
+		return 1;
+	}else if (timercmp(a_c, b_c, <)) {
+		return -1;
+	}else {
+		return 0;
+	}
+	
 }
 
 void cli_free(void *client){
@@ -227,13 +253,22 @@ int blocking_map_remove(const CSKMap *map, char *k, pthread_mutex_t *m, pthread_
 	return res;
 }
 
-void changetimer(time_t sec, suseconds_t usec){
-	struct itimerval *t = (struct itimerval*)malloc(sizeof(struct itimerval));
-	t->it_interval.tv_sec = sec;
-	t->it_interval.tv_usec = usec;
-	t->it_value = t->it_interval;
-	setitimer(ITIMER_REAL, t, NULL); // interval timer
-	free(t);
+int blocking_que_enq(const Queue *q, void *elm, pthread_mutex_t *m, pthread_cond_t *c){
+	int res;
+	pthread_mutex_lock(m);
+	res = q->enqueue(q, elm);
+	pthread_cond_broadcast(c);
+	pthread_mutex_unlock(m);
+	return res;
+}
+
+int blocking_que_deq(const Queue *q, void **elm, pthread_mutex_t *m, pthread_cond_t *c){
+	int res;
+	pthread_mutex_lock(m);
+	res = q->dequeue(q, elm);
+	pthread_cond_broadcast(c);
+	pthread_mutex_unlock(m);
+	return res;
 }
 
 void *serverthread(UNUSED void *arg){
@@ -259,17 +294,17 @@ void *serverthread(UNUSED void *arg){
 	while ((len = bxp_query(bxps, &client, qry, BUFSIZ)) > 0) {
 		// determine if the request is valid at all
 		// determine the request from client
-		printf("%s", qry);
 			
 		if(!validrequest(qry)){
 			sprintf(resp, "0");
 			bxp_response(service, &client, resp, strlen(resp) + 1);
 		}else if (strncmp(qry, "Cancel", 6) == 0) {
+
 			key = strdup(get_request_arg(qry, 1));
 			key[length_arg_ind(qry, 1)] = '\0';
 			if(blocking_map_get(cncls, key, (void**)&tmp, &cncls_lock, &cncls_cond)){
 				tmp->cancel = 1;	
-				sprintf(resp, "1");
+				sprintf(resp, "1%08lu", tmp->svid);
 				bxp_response(service, &client, resp, strlen(resp) + 1);
 			}else{
 				sprintf(resp, "0");
@@ -279,17 +314,17 @@ void *serverthread(UNUSED void *arg){
 		}else{
 			unsigned long c_svid = next_server_id++;
 			char key[BUFSIZ];
-			sprintf(key, "%ld", c_svid);
-			tmp = fill_info(qry, c_svid);
+			sprintf(key, "%08ld", c_svid);
+			tmp = fill_info(qry, c_svid, client);
 
-			double *prio = (double*)malloc(sizeof(double));
-			*prio = difftime(clock(), last_epoch);
+			struct timeval *prio = (struct timeval*)malloc(sizeof(struct timeval));
+			gettimeofday(prio, NULL);
 
 			blocking_q_insert(rqts, prio, tmp, &pq_lock, &pq_cond);
 
 			blocking_map_put(cncls, key, (void*)tmp, &cncls_lock, &cncls_cond); // Add Request to map to cancel possibly later
 
-			sprintf(resp, "1%s\n", key);
+			sprintf(resp, "1%08lu", c_svid);
 			bxp_response(service, &client, resp, strlen(resp) + 1);
 		}
 	}
@@ -299,81 +334,103 @@ void *serverthread(UNUSED void *arg){
 	return NULL;
 }
 
-void alarmhandlr(UNUSED int sig){
-	signal(SIGALRM, alarmhandlr);
+void process_events(void){
 	Request *holder = NULL;
-	double *prio;
-	
+	struct timeval *prio;
+	struct timeval current;
+
 	if (blocking_q_size(rqts, &pq_lock, &pq_cond) == 0) {
 		return;
 	}
-	pthread_mutex_lock(&pq_lock);
-	time_t current; // current time
-	time(&current);
 
-	while (rqts->removeMin(rqts, (void**)&prio, (void**)&holder)&& difftime(current, holder->add_time) >= holder->time) { // See if theres a request in queue and if their time has elapsed
-		if (holder->cancel) {
-			char* key = (char*)malloc(sizeof(char)*BUFSIZ);
-			sprintf(key, "%ld", holder->svid);
-			blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
-			free(key);
-			holder = NULL;
-			time(&current);
-			continue;
-		}
-		printf("Event fired: %lu|%s|%s|%u\n", holder->clid, holder->host, holder->service, holder->port);
-		if (strcmp(holder->request_type, "Repeat") == 0 && --holder->add_info_time != 0) { // if it is a repeat request put back if valid
-			*prio = difftime(current, last_epoch);
-			time(&holder->add_time);
-			rqts->insert(rqts, (void*)prio, (void*)holder);
-		}else{
-			char* key = (char*)malloc(sizeof(char)*BUFSIZ);
-			sprintf(key, "%ld", holder->svid);
-			blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
-			free(key);
-			holder = NULL;
-		}
-		time(&current);
+	gettimeofday(&current, NULL);
+	while (blocking_q_remove(rqts, (void**)&prio, (void**)&holder, &pq_lock, &pq_cond) && timercmp(&current, &holder->time, >)) { // See if theres a request in queue and if their time has elapsed
+		blocking_que_enq(disp, (void*)holder, &disp_lock, &disp_cond);
+		free(prio);
+		holder = NULL;
 	}
 
 	if (holder != NULL) {
-		*prio = difftime(current, last_epoch);
-		rqts->insert(rqts, (void*)prio, (void*)holder);
+		*prio = current;
+		blocking_q_insert(rqts, (void*)prio, (void*)holder, &pq_lock, &pq_cond);
 	}
-	time(&last_epoch);
-	pthread_cond_broadcast(&pq_cond);
-	pthread_mutex_unlock(&pq_lock);
 }
 
 void *timer_thread(UNUSED void*a){
-	struct itimerval *t = (struct itimerval*)malloc(sizeof(struct itimerval));
-	t->it_interval.tv_sec = 0;
-	t->it_interval.tv_usec = 500;
-	t->it_value = t->it_interval;
-	signal(SIGALRM, alarmhandlr); // step catcher 
-	setitimer(ITIMER_REAL, t, NULL);
+	unsigned long long counter = 0;
+	struct timeval current;
 
-//	changetimer(0, 500);
-
-	time(&last_epoch);
-	while (1) { // Keep catching 
-		pause();
+	for(;;){
+		usleep(USECS);
+		gettimeofday(&current, NULL);
+		counter++;
+		if ((counter % time_width) == 0) {
+			process_events();
+		}
 	}
 	return NULL;
 }
 
+void *dispatching_thread(UNUSED void*a){
+	Request *tmp;
+	struct timeval *prio;
+	char* key = (char*)malloc(sizeof(char)*BUFSIZ);
+	while (1) {
+		pthread_mutex_lock(&disp_lock);
+		while (disp->size(disp) == 0) {
+			pthread_cond_wait(&disp_cond, &disp_lock);
+		}
+		pthread_cond_broadcast(&disp_cond);
+		pthread_mutex_unlock(&disp_lock);
+		struct timeval current; // current time
+		gettimeofday(&current, NULL);
+		while (blocking_que_deq(disp, (void**)&tmp, &disp_lock, &disp_cond)) {
+			if (tmp->cancel) {
+				sprintf(key, "%ld", tmp->svid);
+				blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
+				tmp = NULL;
+				continue;
+			}
+
+			printf("Event fired: %lu|%s|%s|%u\n", tmp->clid, tmp->host, tmp->service, tmp->port);
+			if (--tmp->repeats != 0) { 
+				prio = (struct timeval *)malloc(sizeof(struct timeval));
+				gettimeofday(prio, NULL);
+				tmp->time = *prio;
+				tmp->time.tv_usec += tmp->interval;
+				blocking_q_insert(rqts, (void*)prio, (void*)tmp, &pq_lock, &pq_cond);
+			}else{
+				sprintf(key, "%ld", tmp->svid);
+				blocking_map_remove(cncls, key, &cncls_lock, &cncls_cond);
+				tmp = NULL;
+			}
+			gettimeofday(&current, NULL);
+		}	
+	}
+	free(key);
+	return NULL;
+}
+
+/*
+ * TODO: Check memory status with valgrind
+ */
+
 int main(UNUSED int argc, UNUSED char **argv){
-	signal(SIGALRM, SIG_IGN);
 	rqts = PrioQueue_create(cli_cmp, prio_free, cli_free);
 	cncls = CSKMap_create(cli_free);
+	disp = Queue_create(cli_free);
 	pthread_t s;	
 	pthread_t t;
+	pthread_t d;
 	pthread_create(&s, NULL, serverthread, NULL);
 	pthread_create(&t, NULL, timer_thread, NULL);
+	pthread_create(&d, NULL, dispatching_thread, NULL);
 	pthread_join(s, NULL);
 	pthread_join(t, NULL);
+	pthread_join(d, NULL);
 	rqts->destroy(rqts);
 	cncls->destroy(cncls);
+	disp->destroy(disp);
 	
 	return 0;
 }
